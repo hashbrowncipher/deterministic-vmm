@@ -1,0 +1,214 @@
+# Standard CPU definition for the deterministic VMM.
+#
+# Defines the exact CPUID responses for our virtual CPU. The VMM loads this at startup and uses
+# it as a lookup table: for any (leaf, subleaf) the guest queries, return the values here. For
+# leaves not listed, return all zeros.
+#
+# Design goals:
+# - Enough features for 64-bit Linux to boot and run userspace
+# - No features that imply hardware we don't emulate (XSAVE/AVX, VMX, RDRAND)
+# - Fixed identity across all host CPUs for cross-machine determinism
+# - Intel vendor string so the kernel uses leaf 0x15 for TSC frequency
+#
+# Based loosely on Skylake (family 6, model 0x5E) but this is a fictional CPU — the model
+# number is just a hint to the kernel about what generation of quirks to apply.
+
+# ============================================================================
+# Leaf 0x00 — Basic CPUID: max standard leaf + vendor string
+# ============================================================================
+[[cpuid]]
+leaf = 0x00000000
+subleaf = 0x00000000
+eax = 0x00000016  # max standard leaf
+ebx = 0x756E6547  # "Genu"
+ecx = 0x6C65746E  # "ntel"
+edx = 0x49656E69  # "ineI"
+
+# ============================================================================
+# Leaf 0x01 — Version info + feature flags
+# ============================================================================
+[[cpuid]]
+leaf = 0x00000001
+subleaf = 0x00000000
+# EAX encodes family/model/stepping:
+#   stepping      = 3       (bits 3:0)
+#   model low     = 0xE     (bits 7:4)
+#   family        = 6       (bits 11:8)
+#   model high    = 0x5     (bits 19:16)
+#   → family 6, model 0x5E (94 = Skylake-S), stepping 3
+eax = 0x000506E3
+# EBX: brand=0, CLFLUSH line=64 bytes (8×8), 1 logical CPU, APIC ID 0
+ebx = 0x00010800
+# ECX feature flags:
+#   bit  0  SSE3            bit 20  SSE4.2
+#   bit  9  SSSE3           bit 22  MOVBE
+#   bit 13  CMPXCHG16B      bit 23  POPCNT
+#   bit 19  SSE4.1
+#
+# NOT advertised (and why):
+#   TSC-Deadline (bit 24) — VMM and KVM patch support it, but the clockevent
+#                           min_delta calibration storm at 128 GHz virtual TSC makes
+#                           it 24x slower than the legacy periodic timer. See commit
+#                           history for details.
+#   XSAVE (bit 26)   — we don't emulate XSAVE state areas; guest uses FXSAVE
+#   AVX (bit 28)     — requires XSAVE
+#   RDRAND (bit 30)  — not advertised until VMCS-level interception works
+#   AES-NI (bit 25)  — not needed for boot; can add later
+#
+# Advertised but not a real CPU feature:
+#   HYPERVISOR (bit 31) — tells the kernel it's in a VM. This skips the
+#                         microcode version check (which would taint the kernel)
+#                         and doesn't commit us to paravirt: leaf 0x40000000
+#                         returns zeros, so no kvmclock or PV features activate.
+ecx = 0x80D82201
+# EDX feature flags:
+#   bit  0  FPU       bit 13  PGE        bit 24  FXSR
+#   bit  2  DE        bit 14  MCA        bit 25  SSE
+#   bit  3  PSE       bit 15  CMOV       bit 26  SSE2
+#   bit  4  TSC       bit 16  PAT
+#   bit  5  MSR       bit 17  PSE-36
+#   bit  6  PAE       bit 19  CLFLUSH
+#   bit  7  MCE
+#   bit  8  CX8
+#   bit  9  APIC
+#   bit 11  SEP
+#
+# NOT advertised:
+#   MTRR (bit 12) — no MMIO regions; single flat RAM; just wasted boot-time work
+edx = 0x078BEBFD
+
+# ============================================================================
+# Leaf 0x06 — Thermal and Power Management
+# ============================================================================
+[[cpuid]]
+leaf = 0x00000006
+subleaf = 0x00000000
+# EAX bit 2 = ARAT (Always Running APIC Timer): the kernel trusts the APIC timer
+# to tick at a constant rate. Essential for our deterministic timer.
+eax = 0x00000004
+ebx = 0x00000000
+ecx = 0x00000000
+edx = 0x00000000
+
+# ============================================================================
+# Leaf 0x07 — Structured Extended Feature Flags
+# ============================================================================
+[[cpuid]]
+leaf = 0x00000007
+subleaf = 0x00000000
+eax = 0x00000000  # max subleaf = 0
+# EBX:
+#   bit  3  BMI1
+#   bit  7  SMEP  (Supervisor Mode Execution Prevention)
+#   bit  8  BMI2
+#   bit  9  ERMS  (Enhanced REP MOVSB/STOSB)
+#   bit 20  SMAP  (Supervisor Mode Access Prevention)
+ebx = 0x00100388
+ecx = 0x00000000
+# EDX:
+#   bit 29  ARCH_CAPABILITIES — IA32_ARCH_CAPABILITIES MSR is available
+edx = 0x20000000
+
+# ============================================================================
+# Leaf 0x0B — Extended Topology Enumeration (1 thread, 1 core)
+# ============================================================================
+[[cpuid]]
+leaf = 0x0000000B
+subleaf = 0x00000000
+eax = 0x00000000  # bits to shift for next-level APIC ID
+ebx = 0x00000001  # 1 logical processor at this level
+ecx = 0x00000100  # level type 1 = SMT, subleaf 0
+edx = 0x00000000  # x2APIC ID
+
+[[cpuid]]
+leaf = 0x0000000B
+subleaf = 0x00000001
+eax = 0x00000000
+ebx = 0x00000001  # 1 logical processor
+ecx = 0x00000201  # level type 2 = core, subleaf 1
+edx = 0x00000000
+
+# Leaves 0x15 (TSC/Crystal Clock) and 0x16 (Processor Frequency) are synthesized by
+# the VMM at runtime — they're tightly coupled to the LAPIC timer implementation.
+# See CRYSTAL_HZ and TSC_TO_CRYSTAL_RATIO in main.rs.
+
+# ============================================================================
+# Leaf 0x40000000 — Hypervisor identification (disabled)
+# ============================================================================
+# Return zeros so the guest doesn't try KVM paravirt features (kvmclock, etc).
+[[cpuid]]
+leaf = 0x40000000
+subleaf = 0x00000000
+eax = 0x00000000
+ebx = 0x00000000
+ecx = 0x00000000
+edx = 0x00000000
+
+# ============================================================================
+# Leaf 0x80000000 — Max Extended Leaf
+# ============================================================================
+[[cpuid]]
+leaf = 0x80000000
+subleaf = 0x00000000
+eax = 0x80000008  # max extended leaf
+ebx = 0x00000000
+ecx = 0x00000000
+edx = 0x00000000
+
+# ============================================================================
+# Leaf 0x80000001 — Extended Feature Flags
+# ============================================================================
+[[cpuid]]
+leaf = 0x80000001
+subleaf = 0x00000000
+eax = 0x00000000
+ebx = 0x00000000
+# ECX: bit 0 = LAHF/SAHF in 64-bit mode
+ecx = 0x00000001
+# EDX:
+#   bit 11  SYSCALL/SYSRET
+#   bit 20  NX (Execute Disable)
+#   bit 26  1 GiB pages
+#   bit 29  Long Mode (Intel 64)
+edx = 0x24100800
+
+# ============================================================================
+# Leaves 0x80000002–0x80000004 — Processor Name String
+# ============================================================================
+# "Deterministic Virtual CPU v1" (28 chars, null-padded to 48 bytes)
+# Each leaf returns 16 bytes as EAX[3:0] EBX[7:4] ECX[11:8] EDX[15:12], little-endian.
+[[cpuid]]
+leaf = 0x80000002
+subleaf = 0x00000000
+eax = 0x65746544  # "Dete"
+ebx = 0x6E696D72  # "rmin"
+ecx = 0x69747369  # "isti"
+edx = 0x69562063  # "c Vi"
+
+[[cpuid]]
+leaf = 0x80000003
+subleaf = 0x00000000
+eax = 0x61757472  # "rtua"
+ebx = 0x5043206C  # "l CP"
+ecx = 0x31762055  # "U v1"
+edx = 0x00000000
+
+[[cpuid]]
+leaf = 0x80000004
+subleaf = 0x00000000
+eax = 0x00000000
+ebx = 0x00000000
+ecx = 0x00000000
+edx = 0x00000000
+
+# ============================================================================
+# Leaf 0x80000008 — Virtual/Physical Address Sizes
+# ============================================================================
+[[cpuid]]
+leaf = 0x80000008
+subleaf = 0x00000000
+# EAX: physical address bits = 39 (512 GiB), virtual address bits = 48
+eax = 0x00003027
+ebx = 0x00000000
+ecx = 0x00000000
+edx = 0x00000000

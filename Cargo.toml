@@ -1,0 +1,18 @@
+[workspace]
+members = [".", "tools/mkcpio"]
+
+[package]
+name = "deterministic-vmm"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "A KVM-based VMM that boots unmodified Linux with fully deterministic execution"
+
+[dependencies]
+kvm-ioctls = "0.19"
+kvm-bindings = { version = "0.10", features = ["fam-wrappers"] }
+vm-memory = { version = "0.17", features = ["backend-mmap"] }
+linux-loader = { version = "0.13", features = ["bzimage", "elf"] }
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

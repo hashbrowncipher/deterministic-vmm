@@ -1,0 +1,63 @@
+name: Mirror Bootlin toolchain
+
+# Bootlin's download server is occasionally slow or unavailable. This workflow
+# fetches a pinned toolchain tarball, verifies its sha256, and publishes it as
+# a GitHub Release asset so the project can mirror it. Run manually from the
+# Actions tab whenever the pinned version in the Makefile changes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Bootlin toolchain version (e.g. 2025.08-1)"
+        required: true
+        default: "2025.08-1"
+      sha256:
+        description: "Expected sha256 of the tarball"
+        required: true
+        default: "09fca3aa89540f1b01b5f4210d488cbeb00f522044c53e9989b1dd8a38076912"
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download tarball from Bootlin
+        run: |
+          set -euo pipefail
+          tarball="x86-64--musl--stable-${{ inputs.version }}.tar.xz"
+          url="https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64/tarballs/${tarball}"
+          echo "Downloading ${url}"
+          curl -fL --retry 5 --retry-delay 10 --output "${tarball}" "${url}"
+          echo "TARBALL=${tarball}" >> "$GITHUB_ENV"
+
+      - name: Verify sha256
+        run: |
+          set -euo pipefail
+          actual=$(sha256sum "${TARBALL}" | awk '{print $1}')
+          expected="${{ inputs.sha256 }}"
+          if [ "${actual}" != "${expected}" ]; then
+            echo "sha256 mismatch"
+            echo "  expected: ${expected}"
+            echo "  actual:   ${actual}"
+            exit 1
+          fi
+          echo "sha256 OK: ${actual}"
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="bootlin-${{ inputs.version }}"
+          if ! gh release view "${tag}" >/dev/null 2>&1; then
+            gh release create "${tag}" \
+              --title "Bootlin x86-64 musl toolchain ${{ inputs.version }}" \
+              --notes "Mirror of https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64/tarballs/${TARBALL}
+
+          sha256: \`${{ inputs.sha256 }}\`"
+          fi
+          gh release upload "${tag}" "${TARBALL}" --clobber
