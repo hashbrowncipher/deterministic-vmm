@@ -6,6 +6,7 @@ SHELL      := bash
 TOOLCHAIN_VERSION := 2025.08-1
 TOOLCHAIN_TARBALL := x86-64--musl--stable-$(TOOLCHAIN_VERSION).tar.xz
 TOOLCHAIN_URL     := https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64/tarballs/$(TOOLCHAIN_TARBALL)
+TOOLCHAIN_URL     := https://github.com/hashbrowncipher/deterministic-vmm/releases/download/bootlin-2025.08-1/x86-64--musl--stable-2025.08-1.tar.xz
 # taken from https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64/tarballs/x86-64--musl--stable-2025.08-1.sha256
 TOOLCHAIN_SHA256  := 09fca3aa89540f1b01b5f4210d488cbeb00f522044c53e9989b1dd8a38076912
 
@@ -37,7 +38,7 @@ export KBUILD_BUILD_VERSION := 0
 export LC_ALL := C
 export TZ     := UTC
 
-.PHONY: all build clean run verify check-paranoid set-paranoid kernel vmm rootfs toolchain
+.PHONY: all build clean run verify check-paranoid set-paranoid kernel vmm rootfs toolchain submodule
 
 all: verify
 
@@ -87,6 +88,16 @@ set-paranoid:
 	@echo "This will run: sudo sysctl -w kernel.perf_event_paranoid=1"
 	@echo -n "Proceed? [y/N] " && read ans && [ "$$ans" = "y" ] || { echo "Aborted."; exit 1; }
 	sudo sysctl -w kernel.perf_event_paranoid=1
+
+# --- Linux submodule (shallow) -----------------------------------------------
+#
+# Fetches just the pinned commit (depth=1) — the full kernel history is huge
+# and we never need it for builds.
+
+submodule: $(LINUX_SRC)/Makefile
+
+$(LINUX_SRC)/Makefile:
+	git submodule update --init --depth 1 --recommend-shallow $(LINUX_SRC)
 
 # --- Guest kernel (built from the linux/ submodule with pinned toolchain) ----
 
