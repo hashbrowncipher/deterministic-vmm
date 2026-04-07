@@ -105,3 +105,6 @@ expensive under single-step emulation. Ceiling division ensures that timers
 always fire at or after the requested time. The guest patch is purely optional:
 it speeds up the virtualization, but virtualization functions just fine without
 it.
+
+3. **unselect objtool** (build) — removes dependency on objtool during build:
+our musl buildroot doesn't have it.
